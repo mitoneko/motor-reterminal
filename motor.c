@@ -29,6 +29,7 @@ struct motor_device_info {
     struct gpio_desc *forward;
     struct gpio_desc *backward;
     struct gpio_desc *cur_out;
+    bool cur_led_stat;
     struct hrtimer pwm_timer;
     unsigned int period; // pwmベース周期　ns
     unsigned int width_max; // PWMのwidthの絶対値の最大
@@ -123,7 +124,8 @@ static ssize_t motor_write(struct file *fp, const char __user *buf, size_t count
                 gpiod_set_value(bdev->cur_out, 1);
             } else {
                 bdev->on_time = bdev->period / bdev->width_max * pwm_width;
-                gpiod_set_value(bdev->cur_out, 1);
+                bdev->cur_led_stat = true;
+                gpiod_set_value(bdev->cur_out, (int)bdev->cur_led_stat);
                 hrtimer_start(&bdev->pwm_timer, 
                         ktime_set(0, bdev->on_time), HRTIMER_MODE_REL);
             }
@@ -143,15 +145,14 @@ enum hrtimer_restart pwm_timer_handler(struct hrtimer *timer) {
         pr_err("%s:デバイス情報取得失敗\n", __func__);
         return HRTIMER_NORESTART;
     }
-    int cur_led = gpiod_get_value(bdev->cur_out);
-    if (cur_led == 1) {
-        next_period = bdev->period - bdev->on_time;
-        gpiod_set_value(bdev->cur_out, 0);
-    } else {
-        next_period = bdev->on_time;
-        gpiod_set_value(bdev->cur_out, 1);
-    }
+    
+    next_period = (bdev->cur_led_stat) ?  
+        bdev->period - bdev->on_time : bdev->on_time;
     hrtimer_forward_now(&bdev->pwm_timer, ktime_set(0, next_period));
+
+    bdev->cur_led_stat = !bdev->cur_led_stat;
+    gpiod_set_value(bdev->cur_out, (int)bdev->cur_led_stat);
+
     return HRTIMER_RESTART;
 }
 
